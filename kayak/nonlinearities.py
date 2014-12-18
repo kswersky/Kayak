@@ -6,11 +6,12 @@
 # Distributed under an MIT license. See license.txt file.
 
 import numpy as np
-from numpy import exp
-
 import util
 
+from scipy.misc import logsumexp
+
 from . import Differentiable
+from . import EPSILON
 
 class Nonlinearity(Differentiable):
     __slots__ = ['X']
@@ -25,17 +26,10 @@ class SoftReLU(Nonlinearity):
         self.scale  = scale
 
     def _compute_value(self):
-        # Somewhat complicated to handle overflow.
-        X            = self.X.value
-        se           = np.seterr(over='ignore')
-        exp_X        = np.exp(X / self.scale)
-        result       = np.log(1.0 + np.exp( X/self.scale ))*self.scale
-        over         = np.isinf(exp_X)
-        result[over] = X[over]/self.scale
-        return result
+        return logsumexp(np.broadcast_arrays(0,self.X.value/self.scale),0) * self.scale
 
     def _local_grad(self, parent, d_out_d_self):
-        return d_out_d_self/(1.0 + np.exp( - self.X.value/self.scale ))
+        return d_out_d_self*np.exp(-logsumexp(np.broadcast_arrays(0,-self.X.value/self.scale),0))
 
 class HardReLU(Nonlinearity):
     __slots__ = []
@@ -97,6 +91,24 @@ class SoftMax(Nonlinearity):
     def _local_grad(self, parent, d_out_d_self):
         val = self.value
         return val * (d_out_d_self - np.sum(val * d_out_d_self, axis=self.axis, keepdims=True))
+
+class L2Normalize(Nonlinearity):
+    __slots__ = ['axis']
+    def __init__(self, X, axis=1):
+        super(L2Normalize, self).__init__(X)
+        self.axis = axis
+        assert np.all(X.value >= 0)
+
+    def _compute_value(self):
+        X = self.X.value
+        lX = np.log(X + EPSILON)
+        return np.exp(lX - 0.5*util.logsumexp(2*lX, axis=self.axis))
+
+    def _local_grad(self, parent, d_out_d_self):
+        X = self.X.value + EPSILON
+        val = self.value
+        val2 = X / np.sum(X**2, axis=self.axis, keepdims=True)
+        return val * (d_out_d_self / X - np.sum(val2 * d_out_d_self, axis=self.axis, keepdims=True))
 
 class InputSoftMax(Nonlinearity):
     __slots__ = ['ncolors']

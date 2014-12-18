@@ -5,8 +5,9 @@
 # Copyright 2014, The President and Fellows of Harvard University
 # Distributed under an MIT license. See license.txt file.
 
+import collections
 import numpy as np
-from input_checking import check_equal_ndims_for_broadcasting
+import scipy.linalg as spla
 from . import Differentiable
 
 class MatMult(Differentiable):
@@ -34,13 +35,13 @@ class MatMult(Differentiable):
             if B_val.ndim == 2:
                 return np.dot(d_out_d_self, B_val.T)
             else:
-                return np.outer(d_out_d_self, B_val)
+                return np.outer(d_out_d_self, B_val).reshape(self.A.shape)
         elif parent == 1:
             A_val = self.A.value
             if A_val.ndim ==2:
                 return np.dot(A_val.T, d_out_d_self)
             else:
-                return np.outer(A_val, d_out_d_self)
+                return np.outer(A_val, d_out_d_self).reshape(self.B.shape)
         else:
             raise Exception("Not a parent of me")
 
@@ -89,12 +90,93 @@ class MatMean(Differentiable):
         else:
             return d_out_d_self * 1.0/N * np.ones(self.A.shape)
 
+# class MatAdd(Differentiable):
+#     __slots__ = ['A','B']
+#     def __init__(self, A, B):
+#         super(MatAdd, self).__init__((A,B))
+#         self.A = A
+#         self.B = B
+
+#     def _compute_value(self):
+#         return self.A.value + self.B.value
+
+#     def _local_grad(self, parent, d_out_d_self):
+#         if parent == 0:
+#             if self.A.value.ndim >= self.B.value.ndim:
+#                 # A has equal or more dimensions than B so post-broadcasting
+#                 # we will sum over the singleton dimensions of A.
+#                 singleton_inds = np.array(self.A.shape) == 1
+#                 sum_dims = tuple(np.arange(self.A.value.ndim)[singleton_inds])
+#             else:
+#                 # A has fewer dimensions than B so post-broadcasting
+#                 # we will sum over the extra dimensions at the beginning of the array.
+#                 sum_dims = tuple(range(0, self.B.value.ndim - self.A.value.ndim))
+
+#             if sum_dims:
+#                 return np.sum(d_out_d_self, sum_dims).reshape(self.A.shape)
+#             else:
+#                 return d_out_d_self
+#         elif parent == 1:
+#             if self.B.value.ndim >= self.A.value.ndim:
+#                 # B has equal or more dimensions than A so post-broadcasting
+#                 # we will sum over the singleton dimensions of B.
+#                 singleton_inds = np.array(self.B.shape) == 1
+#                 sum_dims = tuple(np.arange(self.B.value.ndim)[singleton_inds])
+#             else:
+#                 # B has fewer dimensions than A so post-broadcasting
+#                 # we will sum over the extra dimensions at the beginning of the array.
+#                 sum_dims = tuple(range(0, self.A.value.ndim - self.B.value.ndim))
+#             if sum_dims:    
+#                 return np.sum(d_out_d_self, sum_dims).reshape(self.B.shape)
+#             else:
+#                 return d_out_d_self
+
+# class MatElemMult(Differentiable):
+#     __slots__ = ['A','B']
+#     def __init__(self, A, B):
+#         super(MatElemMult, self).__init__((A,B))
+#         self.A = A
+#         self.B = B
+
+#     def _compute_value(self):
+#         return self.A.value * self.B.value
+
+#     def _local_grad(self, parent, d_out_d_self):
+#         if parent == 0:
+#             if self.A.value.ndim >= self.B.value.ndim:
+#                 # A has equal or more dimensions than B so post-broadcasting
+#                 # we will sum over the singleton dimensions of A.
+#                 singleton_inds = np.array(self.A.shape) == 1
+#                 sum_dims = tuple(np.arange(self.A.value.ndim)[singleton_inds])
+#             else:
+#                 # A has fewer dimensions than B so post-broadcasting
+#                 # we will sum over the extra dimensions at the beginning of the array.
+#                 sum_dims = tuple(range(0, self.B.value.ndim - self.A.value.ndim))
+
+#             if sum_dims:
+#                 return np.sum(d_out_d_self*self.B.value, sum_dims).reshape(self.A.shape)
+#             else:
+#                 return d_out_d_self*self.B.value
+#         elif parent == 1:
+#             if self.B.value.ndim >= self.A.value.ndim:
+#                 # B has equal or more dimensions than A so post-broadcasting
+#                 # we will sum over the singleton dimensions of B.
+#                 singleton_inds = np.array(self.B.shape) == 1
+#                 sum_dims = tuple(np.arange(self.B.value.ndim)[singleton_inds])
+#             else:
+#                 # B has fewer dimensions than A so post-broadcasting
+#                 # we will sum over the extra dimensions at the beginning of the array.
+#                 sum_dims = tuple(range(0, self.A.value.ndim - self.B.value.ndim))
+
+#             if sum_dims:
+#                 return np.sum(d_out_d_self*self.A.value, sum_dims).reshape(self.B.shape)
+#             else:
+#                 return d_out_d_self*self.A.value
+
 class MatAdd(Differentiable):
     __slots__ = []
     def __init__(self, *args):
         super(MatAdd, self).__init__(args)
-
-    _check_inputs = check_equal_ndims_for_broadcasting
 
     def _compute_value(self):
         return sum([p.value for p in self._parents])
@@ -110,7 +192,7 @@ class MatAdd(Differentiable):
 
         assert len(result.shape) == len(parent_shape)
         original_singletons = tuple(np.where(np.array(parent_shape) == 1)[0])
-        return np.sum(result, axis=original_singletons, keepdims=True)
+        return np.sum(result, axis=original_singletons, keepdims=True).reshape(parent_shape)
 
 class MatElemMult(Differentiable):
     """
@@ -127,8 +209,6 @@ class MatElemMult(Differentiable):
 
         self.A = A
         self.B = B
-
-    _check_inputs = check_equal_ndims_for_broadcasting
 
     def _compute_value(self):
         return self.A.value * self.B.value
@@ -153,17 +233,22 @@ class MatElemMult(Differentiable):
         else:
             result = d_out_d_self*other_parent_value
 
+        if parent == 0:
+            final_shape = self.A.shape
+        elif parent == 1:
+            final_shape = self.B.shape
+
         # In mutliplying, we may have broadcast the parent.
         # Sum out those dimensions as well.
         assert len(result.shape) == len(parent_shape)
         original_singletons = tuple(np.where(np.array(parent_shape) == 1)[0])
-        return np.sum(result, axis=original_singletons, keepdims=True)
+        return np.sum(result, axis=original_singletons, keepdims=True).reshape(final_shape)
 
 class MatDet(Differentiable):
     __slots__ = ['A']
     def __init__(self, A, axis=None, keepdims=True):
         super(MatDet, self).__init__((A,))
-        self.A    = A
+        self.A = A
 
     def _compute_value(self):
         return np.linalg.det(self.A.value)
@@ -173,26 +258,114 @@ class MatDet(Differentiable):
         return d_out_d_self * det * np.linalg.inv(self.A.value).T
 
 class MatLogDet(Differentiable):
-    pass
-
-class MatTrace(Differentiable):
-    pass
-
-class Transpose(Differentiable):
-    __slots__ = ['A', 'axes']
-    def __init__(self, A, axes=None):
-        super(Transpose, self).__init__((A,))
-        self.A    = A
-        self.axes = axes
+    __slots__ = ['A','L']
+    def __init__(self, A):
+        super(MatLogDet, self).__init__((A,))
+        self.A = A
+        self.L = None
 
     def _compute_value(self):
-        return np.transpose(self.A.value, axes=self.axes)
+        self.L = spla.cholesky(self.A.value,lower=True)
+        return 2*np.sum(np.log(np.diag(self.L)))
 
     def _local_grad(self, parent, d_out_d_self):
-        if self.axes is None:
-            return np.transpose(d_out_d_self)
+        val = self.value # Use cached cholesky if possible
+        return spla.cho_solve((self.L,True),np.eye(self.A.shape[0]).dot(d_out_d_self))
+
+class MatTrace(Differentiable):
+    __slots__ = ['A']
+    def __init__(self, A):
+        super(MatTrace, self).__init__((A,))
+        self.A = A
+
+    def _compute_value(self):
+        return np.trace(self.A.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        return d_out_d_self*np.eye(self.A.shape[0])
+
+class MatInv(Differentiable):
+    __slots__ = ['A']
+    def __init__(self, A):
+        super(MatInv, self).__init__((A,))
+        self.A = A
+
+    def _compute_value(self):
+        return np.linalg.inv(self.A.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        return -self.value.T.dot(d_out_d_self).dot(self.value.T)
+
+class MatDiag(Differentiable):
+    __slots__ = ['A']
+    def __init__(self, A):
+        super(MatDiag, self).__init__((A,))
+        self.A = A
+
+    def _compute_value(self):
+        return np.diag(self.A.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        return np.diag(d_out_d_self)
+
+class MatEye(Differentiable):
+    __slots__ = ['size']
+    def __init__(self, size):
+        super(MatEye, self).__init__(())
+        self.size = size
+
+    def _compute_value(self):
+        return np.eye(self.size)
+
+    def _local_grad(self, parent, d_out_d_self):
+        return np.zeros(self.size)
+
+class MatShape(Differentiable):
+    __slots__ = ['A', 'dims']
+    def __init__(self, A, dims=None):
+        super(MatShape, self).__init__((A,))
+        self.A = A
+        self.dims = dims
+
+    def _compute_value(self):
+        if self.dims is None:
+            return self.A.shape
         else:
-            return np.transpose(d_out_d_self, axes=np.argsort(self.axes))
+            if isinstance(self.dims, collections.Iterable):
+                return np.array([self.A.shape[i] for i in self.dims])
+            else:
+                return np.array(self.A.shape[self.dims])
+
+    def _local_grad(self, parent, d_out_d_self):
+        return np.zeros(self.A.shape)
+
+class MatKron(Differentiable):
+    """
+    Currently only guaranteed to work for 2D arrays.
+    """
+    __slots__ = ['A', 'B']
+    def __init__(self, A, B):
+        super(MatKron, self).__init__([A,B])
+        self.A = A
+        self.B = B
+
+    def _compute_value(self):
+        return np.kron(self.A.value, self.B.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        # This is just an exercise in numpy array manipulation...
+        if parent == 0:
+            O = np.ones(self.A.shape)
+            temp = np.add.reduceat(d_out_d_self*np.kron(O,self.B.value),np.arange(0,self.value.shape[1],self.B.shape[1]),axis=1)
+            return np.add.reduceat(temp,np.arange(0,self.value.shape[0],self.B.shape[0]),axis=0)
+        elif parent == 1:
+            # The above case handles kron(A,B), so we first rotate d_out_d_self
+            # to look like d_kron(B,A) and then take the derivative wrt B.
+            temp = np.take(d_out_d_self,np.arange(self.value.shape[1]).reshape((self.A.shape[1],self.B.shape[1])).T.ravel(),axis=1)
+            d_temp = np.take(temp,np.arange(self.value.shape[0]).reshape((self.A.shape[0],self.B.shape[0])).T.ravel(),axis=0)
+            O = np.ones(self.B.shape)
+            temp = np.add.reduceat(d_temp*np.kron(O,self.A.value),np.arange(0,self.value.shape[1],self.A.shape[1]),axis=1)
+            return np.add.reduceat(temp,np.arange(0,self.value.shape[0],self.A.shape[0]),axis=0)
 
 class Reshape(Differentiable):
     __slots__ = ['A', 'new_shape']
@@ -207,6 +380,20 @@ class Reshape(Differentiable):
 
     def _local_grad(self, parent, d_out_d_self):
         return np.reshape(d_out_d_self, self.A.shape)
+
+class ExpandDims(Differentiable):
+    __slots__ = ['A', 'axis']
+
+    def __init__(self, A, axis):
+        super(ExpandDims, self).__init__((A,))
+        self.A    = A
+        self.axis = axis
+
+    def _compute_value(self):
+        return np.expand_dims(self.A.value, self.axis)
+
+    def _local_grad(self, parent, d_out_d_self):
+        return np.squeeze(d_out_d_self, self.axis)
 
 class Concatenate(Differentiable):
     __slots__ = ['axis']
@@ -224,17 +411,16 @@ class Concatenate(Differentiable):
         return index_along_axis(d_out_d_self, self.axis, start_ix, end_ix)
 
 class ListToArray(Differentiable):
-    """Build an array out of a list of arrays by prepending a dimensions
-    and concatenating."""
+    """Build an array out of a list of numbers."""
     __slots__ = []
     def __init__(self, *args):
         super(ListToArray, self).__init__(args)
 
     def _compute_value(self):
-        return np.concatenate([p.value[None, :] for p in self._parents], axis=0)
+        return np.array([p.value for p in self._parents])
 
     def _local_grad(self, parent_ix, d_out_d_self):
-        return d_out_d_self[parent_ix, :]
+        return d_out_d_self[parent_ix]
 
 def index_along_axis(array, axis, start, end):
     """Return everything up to but not including end.
@@ -286,8 +472,6 @@ def safe_tensordot(A, B, axes):
         return np.zeros(Anewdims + Bnewdims)
     else:
         return np.tensordot(A, B, axes)
-
-
 
 class Identity(Differentiable):
     __slots__ = []

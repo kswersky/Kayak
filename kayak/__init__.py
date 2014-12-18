@@ -11,18 +11,19 @@ import numpy as np
 
 EPSILON = sys.float_info.epsilon
 
-from differentiable import Differentiable
+from differentiable import Differentiable, Transpose
 from root_nodes     import Constant, Parameter, DataNode, Inputs, Targets
+from slicing        import Slice
 from batcher        import Batcher
-from matrix_ops     import MatAdd, MatMult, MatElemMult, MatSum, MatMean, Transpose, Reshape, Concatenate, Identity, TensorMult, ListToArray, MatDet
+from matrix_ops     import MatAdd, MatMult, MatElemMult, MatSum, MatMean, MatEye, MatDiag, Reshape, Concatenate, Identity, TensorMult, ListToArray, MatDet
 from elem_ops       import ElemAdd, ElemMult, ElemExp, ElemLog, ElemPower, ElemAbs
 from nonlinearities import SoftReLU, HardReLU, LogSoftMax, TanH, Logistic, InputSoftMax, SoftMax
-from losses         import L2Loss, LogMultinomialLoss
+from losses         import L2, LogMultinomial
 from dropout        import Dropout
-from regularizers   import L2Norm, L1Norm, Horseshoe, NExp
+from regularizers   import L2Norm, L1Norm, Horseshoe, NExp, RunningAvgKLSparsity
 from crossval       import CrossValidator
 from convolution    import Convolve1d
 from indexing       import Take
-from stacking       import Hstack
+from stacking       import Hstack, Vstack
 from generic_ops    import Blank
 

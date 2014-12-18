@@ -5,19 +5,43 @@
 # Copyright 2014, The President and Fellows of Harvard University
 # Distributed under an MIT license. See license.txt file.
 
+import weakref
 import numpy as np
 
+
+class ndarray(np.ndarray):
+
+    def __new__(cls, input_array, parent=None):
+        obj = np.asarray(input_array).view(cls)
+        obj.parent = parent
+        return obj
+
+    def __getitem__(self, index):
+        return super(ndarray, self).__getitem__(index)
+
+    def __setitem__(self, index, value):
+        super(ndarray, self).__setitem__(index, value)
+        if hasattr(self, 'parent') and self.parent is not None:
+            self.parent._clear_value_cache()
+            self.parent._clear_grad_cache()
+            self.parent._value = self
+
 class Differentiable(object):
-    __slots__ = ['_value', '_grad', '_loss', '_parents', '_children']
+    __slots__ = ['_value', '_grad', '_loss', '_parents', '_children', '_parent_indices', 'T', '__weakref__']
     def __init__(self, parents=()):
         self._value = None # Cached value
         self._grad  = None # Cached grad
         self._loss  = None # Loss we are caching with respect to
+
+        self._parents  = tuple(parents)
         for parent_index, parent in enumerate(parents):
             parent._add_child(self, parent_index)
 
-        self._parents = tuple(parents)
-        self._children = ()
+        self._children = weakref.WeakValueDictionary()
+
+        # We only want to store the transpose once, not the transpose of the transpose, etc.
+        if not isinstance(self, Transpose):
+            self.T = Transpose(self)
 
     @property
     def value(self):
@@ -31,7 +55,6 @@ class Differentiable(object):
         """
         # If the value is not yet cached, compute it.
         if self._value is None:
-            self._check_inputs()
             self._value = self._compute_value()
 
         return self._value
@@ -39,7 +62,13 @@ class Differentiable(object):
     @value.setter
     def value(self, new_value):
         self._clear_value_cache()
-        self._value = new_value
+        if not isinstance(new_value, np.ndarray):
+            new_value = np.array(new_value)
+        self._value = ndarray(new_value,parent=self)
+
+    @property
+    def _children_with_parent_indices(self):
+        return [(self._children[key], key[1]) for key in self._children.keys()]
 
     def _clear_value_cache(self):
         """
@@ -48,7 +77,7 @@ class Differentiable(object):
         to their parents' values.
         """
         if self._value is not None:
-            [child._clear_value_cache() for child, _ in self._children]
+            [child._clear_value_cache() for child in self._children.values()]
             self._clear_grad_cache()
             self._value = None
 
@@ -56,6 +85,7 @@ class Differentiable(object):
         if self._grad is not None:
             [parent._clear_grad_cache() for parent in self._parents]
             self._grad = None
+            self._loss = None
         
     def grad(self, other):
         """Compute the gradient of this module in terms of another
@@ -83,6 +113,18 @@ class Differentiable(object):
     def shape(self):
         return self.value.shape
 
+    def sum(self, axis=None):
+        from . import MatSum
+        return MatSum(self, axis=axis)
+
+    def mean(self, axis=None):
+        from . import MatMean
+        return MatMean(self, axis=axis)
+
+    def dot(self, B):
+        from . import MatMult
+        return MatMult(self, B)
+
     def _d_out_d_self(self, out):
         # Cached grad is not valid or refers to a different loss,
         # so we need to recompute compute the gradient
@@ -93,7 +135,7 @@ class Differentiable(object):
                 grad = 0
             else:
                 grad = sum(child._d_out_d_parent(out, parent_index)
-                           for child, parent_index in self._children)
+                           for child, parent_index in self._children_with_parent_indices)
 
             self._loss = out
             self._grad = grad
@@ -108,13 +150,9 @@ class Differentiable(object):
         else:
             return self._local_grad(parent, d_out_d_self)
 
-    def _check_inputs(self):
-        # Override in subclass if you want to check inputs at compute value time
-        pass
-
     def _add_child(self, child, parent_index):
         """Parent_index is an int that tells out child which parent we are."""
-        self._children = self._children + ((child, parent_index), )
+        self._children[(id(child), parent_index)] = child
 
     def _local_grad(self, parent, d_out_d_self):
         """Return d_out_d_self * d_self_d_parent"""
@@ -122,6 +160,14 @@ class Differentiable(object):
 
     def _compute_value(self):
         raise Exception("Class 'Differentiable' is abstract.")
+
+
+    def __getitem__(self, index):
+        from . import Slice
+        return Slice(self, index)
+
+    def __setitem__(self, index, new_val):
+        self.value[index] = new_val
 
     # Overload plus and times operators with elementwise operations
     # To avoid circular imports, we wait until the operator is called
@@ -176,5 +222,18 @@ class Differentiable(object):
         from . import ElemAbs
         return ElemAbs(self)
 
+class Transpose(Differentiable):
+    __slots__ = ['A', 'axes']
+    def __init__(self, A, axes=None):
+        super(Transpose, self).__init__((A,))
+        self.A    = A
+        self.axes = axes
 
+    def _compute_value(self):
+        return np.transpose(self.A.value, axes=self.axes)
 
+    def _local_grad(self, parent, d_out_d_self):
+        if self.axes is None:
+            return np.transpose(d_out_d_self)
+        else:
+            return np.transpose(d_out_d_self, axes=np.argsort(self.axes))

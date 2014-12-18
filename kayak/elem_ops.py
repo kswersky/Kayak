@@ -70,22 +70,45 @@ class ElemPower(Elementwise):
 
     NOTE: Fractional powers are only defined for positive bases.
           We do not check for this; numpy will throw a runtime exception.
+
+    NOTE: This only supports A**p where p is a scalar value.
     """
-    __slots__ = ['A', 'pow']
-    def __init__(self, A, pow):
-        super(ElemPower, self).__init__([A])
+    __slots__ = ['A', 'p']
+    def __init__(self, A, p):
+        if isinstance(p, Differentiable):
+            assert p.value.size == 1, 'ElemPower only allows scalar powers.'
+            super(ElemPower, self).__init__([A,p])
+        else:
+            assert np.isscalar(p), 'ElemPower only allows scalar powers.'
+            super(ElemPower, self).__init__([A])
+
         self.A = A
-        assert np.isscalar(pow), 'Power must be a scalar value.'
-        self.pow = pow
+        self.p = p
 
     def _compute_value(self):
-        return np.power(self.A.value, self.pow)
+        if isinstance(self.p, Differentiable):
+            p = np.squeeze(self.p.value)
+        else:
+            p = self.p
+            
+        return self.A.value**p
 
     def _local_grad(self, parent, d_out_d_self):
-        if parent == 0:
-            return d_out_d_self * self.pow * np.power(self.A.value, self.pow-1)
+        if isinstance(self.p, Differentiable):
+            p = np.squeeze(self.p.value)
         else:
-            raise Exception("Not a parent of me")
+            if parent > 0:
+                raise Exception('Not a parent of me.')
+            p = self.p
+
+        if parent == 0:
+            return d_out_d_self * p * self.A.value**(p-1)
+        else:
+            if np.issubdtype(self.A.value.dtype, np.integer) and not (self.A.value & 0x1):
+                return np.sum(d_out_d_self * self.value * np.log(np.abs(self.A.value)))
+            else:
+                return np.sum(d_out_d_self * self.value * np.log(self.A.value))
+
 
 class ElemAbs(Elementwise):
     """
