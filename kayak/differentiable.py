@@ -169,10 +169,11 @@ class Differentiable(object):
         while not q.empty():
             node = q.get(block=False)
             for parent in node._parents:
-                if not parent in visited:
-                    visited.add(parent)
-                    q.put(parent)
-                    bfs_list.append(parent)
+                if parent._parents:
+                    if not parent in visited:
+                        visited.add(parent)
+                        q.put(parent)
+                        bfs_list.append(parent)
 
         return bfs_list
 
@@ -184,11 +185,14 @@ class Differentiable(object):
             elif not node._children:
                 node.stuff = 0
             else:
-                node.stuff = sum(child._local_grad(parent_index, child.stuff)
-                         for child, parent_index in node._children_with_parent_indices
-                         if child.stuff is not 0)
+                try:
+                    node.stuff = sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
+                             for child, parent_index in node._children_with_parent_indices)
+                except Exception as e:
+                    raise e
 
-        return other.stuff
+        return sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
+                    for child, parent_index in other._children_with_parent_indices)
 
     def _add_child(self, child, parent_index):
         """Parent_index is an int that tells out child which parent we are."""
