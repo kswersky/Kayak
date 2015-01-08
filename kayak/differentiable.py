@@ -8,6 +8,8 @@
 import weakref
 import numpy as np
 
+from Queue import Queue as SimpleQueue
+
 
 class ndarray(np.ndarray):
 
@@ -24,14 +26,15 @@ class ndarray(np.ndarray):
         if hasattr(self, 'parent') and self.parent is not None:
             self.parent._clear_value_cache()
             self.parent._clear_grad_cache()
-            self.parent._value = self
+            self.parent._value = np.atleast_1d(self)
 
 class Differentiable(object):
-    __slots__ = ['_value', '_grad', '_loss', '_parents', '_children', '_parent_indices', 'T', '__weakref__']
+    __slots__ = ['_value', '_grad', '_loss', '_parents', '_children', '_parent_indices', '_T', '__weakref__', 'stuff']
     def __init__(self, parents=()):
         self._value = None # Cached value
         self._grad  = None # Cached grad
         self._loss  = None # Loss we are caching with respect to
+        self._T     = None
 
         self._parents  = tuple(parents)
         for parent_index, parent in enumerate(parents):
@@ -39,9 +42,12 @@ class Differentiable(object):
 
         self._children = weakref.WeakValueDictionary()
 
-        # We only want to store the transpose once, not the transpose of the transpose, etc.
-        if not isinstance(self, Transpose):
-            self.T = Transpose(self)
+    @property
+    def T(self):
+        if self._T is None:
+            self._T = Transpose(self)
+        
+        return self._T
 
     @property
     def value(self):
@@ -57,14 +63,14 @@ class Differentiable(object):
         if self._value is None:
             self._value = self._compute_value()
 
-        return self._value
+        return np.array(self._value)
 
     @value.setter
     def value(self, new_value):
         self._clear_value_cache()
         if not isinstance(new_value, np.ndarray):
             new_value = np.array(new_value)
-        self._value = ndarray(new_value,parent=self)
+        self._value = ndarray(np.atleast_1d(new_value),parent=self)
 
     @property
     def _children_with_parent_indices(self):
@@ -113,6 +119,10 @@ class Differentiable(object):
     def shape(self):
         return self.value.shape
 
+    @property
+    def size(self):
+        return self.value.size
+
     def sum(self, axis=None):
         from . import MatSum
         return MatSum(self, axis=axis)
@@ -149,6 +159,36 @@ class Differentiable(object):
             return 0
         else:
             return self._local_grad(parent, d_out_d_self)
+
+    def _bfs(self):
+        q = SimpleQueue()
+        q.put(self)
+        bfs_list = [self]
+
+        visited = set()
+        while not q.empty():
+            node = q.get(block=False)
+            for parent in node._parents:
+                if not parent in visited:
+                    visited.add(parent)
+                    q.put(parent)
+                    bfs_list.append(parent)
+
+        return bfs_list
+
+    def bfs_grad(self, other):
+        bfs_list = self._bfs()
+        for node in bfs_list:
+            if node is self:
+                node.stuff = np.ones(self.shape)
+            elif not node._children:
+                node.stuff = 0
+            else:
+                node.stuff = sum(child._local_grad(parent_index, child.stuff)
+                         for child, parent_index in node._children_with_parent_indices
+                         if child.stuff is not 0)
+
+        return other.stuff
 
     def _add_child(self, child, parent_index):
         """Parent_index is an int that tells out child which parent we are."""
@@ -203,11 +243,15 @@ class Differentiable(object):
 
     # NOTE: Assuming Python 2.x syntax for div
     def __div__(self, other):
-        from . import ElemPower
+        from . import ElemPower, Constant
+        if not isinstance(other, Differentiable):
+            other = Constant(other)
         return self * ElemPower(other, -1)
 
     def __rdiv__(self, other):
-        from . import ElemPower
+        from . import ElemPower, Constant
+        if not isinstance(other, Differentiable):
+            other = Constant(other)
         return other * ElemPower(self, -1)
 
     def __neg__(self):
@@ -222,12 +266,40 @@ class Differentiable(object):
         from . import ElemAbs
         return ElemAbs(self)
 
+    def __eq__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.equal)
+
+    def __ne__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.not_equal)
+
+    def __gt__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.greater)
+
+    def __lt__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.less)
+
+    def __ge__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.greater_equal)
+
+    def __le__(self, other):
+        from . import Comparison
+        return Comparison(self, other, np.less_equal)
+
 class Transpose(Differentiable):
     __slots__ = ['A', 'axes']
     def __init__(self, A, axes=None):
         super(Transpose, self).__init__((A,))
         self.A    = A
         self.axes = axes
+
+    @property
+    def T(self):
+        return self.A
 
     def _compute_value(self):
         return np.transpose(self.A.value, axes=self.axes)

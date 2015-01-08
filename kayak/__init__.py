@@ -15,8 +15,8 @@ from differentiable import Differentiable, Transpose
 from root_nodes     import Constant, Parameter, DataNode, Inputs, Targets
 from slicing        import Slice
 from batcher        import Batcher
-from matrix_ops     import MatAdd, MatMult, MatElemMult, MatSum, MatMean, MatEye, MatDiag, Reshape, Concatenate, Identity, TensorMult, ListToArray, MatDet
-from elem_ops       import ElemAdd, ElemMult, ElemExp, ElemLog, ElemPower, ElemAbs
+from matrix_ops     import MatAdd, MatMult, MatElemMult, MatSum, MatMean, MatEye, MatDiag, Reshape, Concatenate, Identity, TensorMult, ListToArray, MatDet, ExpandDims, Comparison
+from elem_ops       import ElemAdd, ElemMult, ElemExp, ElemLog, ElemPower, ElemAbs, Maximum, Minimum, Log, Exp, Sqrt
 from nonlinearities import SoftReLU, HardReLU, LogSoftMax, TanH, Logistic, InputSoftMax, SoftMax
 from losses         import L2, LogMultinomial
 from dropout        import Dropout
@@ -26,4 +26,10 @@ from convolution    import Convolve1d
 from indexing       import Take
 from stacking       import Hstack, Vstack
 from generic_ops    import Blank
+
+def enum(*sequential, **named):
+    enums = dict(zip(sequential, range(len(sequential))), **named)
+    reverse = dict((value, key) for key, value in enums.iteritems())
+    enums['reverse_mapping'] = reverse
+    return type('Enum', (), enums)
 

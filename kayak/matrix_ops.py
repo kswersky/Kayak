@@ -483,3 +483,20 @@ class Identity(Differentiable):
 
     def _local_grad(self, parent_ix, d_out_d_self):
         return d_out_d_self
+
+class Comparison(Differentiable):
+    __slots__ = ['A', 'B', 'op']
+    def __init__(self, A, B, op):
+        super(Comparison, self).__init__((A, B))
+        self.A  = A
+        self.B  = B
+        self.op = op
+
+    def _compute_value(self):
+        return self.op(self.A.value, self.B.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        if parent == 0:
+            return np.zeros(self.A.shape)
+        else:
+            return np.zeros(self.B.shape)

@@ -12,7 +12,7 @@
 # Distributed under an MIT license. See license.txt file.
 
 import numpy as np
-from . import Differentiable
+from . import Differentiable, Parameter
 import matrix_ops
 
 class Elementwise(Differentiable):
@@ -71,44 +71,34 @@ class ElemPower(Elementwise):
     NOTE: Fractional powers are only defined for positive bases.
           We do not check for this; numpy will throw a runtime exception.
 
-    NOTE: This only supports A**p where p is a scalar value.
+    NOTE: This will not work for negative numbers raised to even powers.
     """
     __slots__ = ['A', 'p']
     def __init__(self, A, p):
-        if isinstance(p, Differentiable):
-            assert p.value.size == 1, 'ElemPower only allows scalar powers.'
-            super(ElemPower, self).__init__([A,p])
-        else:
-            assert np.isscalar(p), 'ElemPower only allows scalar powers.'
-            super(ElemPower, self).__init__([A])
+        if not isinstance(p, Differentiable):
+            p = Parameter(p)
+
+        super(ElemPower, self).__init__([A,p])
 
         self.A = A
         self.p = p
 
     def _compute_value(self):
-        if isinstance(self.p, Differentiable):
-            p = np.squeeze(self.p.value)
-        else:
-            p = self.p
-            
-        return self.A.value**p
+        return self.A.value**self.p.value
 
     def _local_grad(self, parent, d_out_d_self):
-        if isinstance(self.p, Differentiable):
-            p = np.squeeze(self.p.value)
-        else:
-            if parent > 0:
-                raise Exception('Not a parent of me.')
-            p = self.p
-
+        p = self.p.value
         if parent == 0:
-            return d_out_d_self * p * self.A.value**(p-1)
+            inds = self.A.value == 0
+            c    = self.A.value + inds
+            return (1 - inds) * d_out_d_self * p * c**(p-1)
         else:
-            if np.issubdtype(self.A.value.dtype, np.integer) and not (self.A.value & 0x1):
-                return np.sum(d_out_d_self * self.value * np.log(np.abs(self.A.value)))
+            c = self.A.value + (self.A.value == 0) # Special case subgradient if A is 0.
+            ret = d_out_d_self * self.value * np.log(c)
+            if self.p.value.size > 1:
+                return ret
             else:
-                return np.sum(d_out_d_self * self.value * np.log(self.A.value))
-
+                return ret.sum()
 
 class ElemAbs(Elementwise):
     """
@@ -127,3 +117,48 @@ class ElemAbs(Elementwise):
             return d_out_d_self * np.sign(self.A.value)
         else:
             raise Exception("Not a parent of me")
+
+class Maximum(Elementwise):
+    """
+    Elementwise maximum between two arrays.
+    """
+    __slots__ = ['A', 'B']
+    def __init__(self, A, B):
+        super(Maximum, self).__init__([A, B])
+        self.A = A
+        self.B = B
+
+    def _compute_value(self):
+        return np.maximum(self.A.value, self.B.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        if parent == 0:
+            return d_out_d_self * (self.A.value >= self.B.value)
+        else:
+            return d_out_d_self * (self.A.value < self.B.value)
+
+class Minimum(Elementwise):
+    """
+    Elementwise minimum between two arrays.
+    """
+    __slots__ = ['A', 'B']
+    def __init__(self, A, B):
+        super(Minimum, self).__init__([A, B])
+        self.A = A
+        self.B = B
+
+    def _compute_value(self):
+        return np.minimum(self.A.value, self.B.value)
+
+    def _local_grad(self, parent, d_out_d_self):
+        if parent == 0:
+            return d_out_d_self * (self.A.value <= self.B.value)
+        else:
+            return d_out_d_self * (self.A.value > self.B.value)
+
+Log = ElemLog
+Exp = ElemExp
+
+def Sqrt(X):
+    p = Parameter(0.5)
+    return ElemPower(X, p)
