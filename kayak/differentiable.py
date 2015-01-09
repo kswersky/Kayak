@@ -9,6 +9,7 @@ import weakref
 import numpy as np
 
 from Queue import Queue as SimpleQueue
+from collections import OrderedDict
 
 
 class ndarray(np.ndarray):
@@ -177,9 +178,24 @@ class Differentiable(object):
 
         return bfs_list
 
-    def bfs_grad(self, other):
-        bfs_list = self._bfs()
-        for node in bfs_list:
+    def _topological_sort(self):
+        L = []
+        visited = set()
+
+        self._visit(self, L, visited)
+
+        return L
+
+    def _visit(self, node, L, visited):
+        if node not in visited:
+            for child in node._children.values():
+                self._visit(child, L, visited)
+            visited.add(node)
+            L.insert(0, node)
+
+    def newgrad(self, other):
+        simple_paths = other._topological_sort()
+        for node in reversed(simple_paths):
             if node is self:
                 node.stuff = np.ones(self.shape)
             elif not node._children:
@@ -191,8 +207,13 @@ class Differentiable(object):
                 except Exception as e:
                     raise e
 
-        return sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
+        g = sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
                     for child, parent_index in other._children_with_parent_indices)
+
+        if g is 0:
+            return np.zeros(other.shape)
+        
+        return g
 
     def _add_child(self, child, parent_index):
         """Parent_index is an int that tells out child which parent we are."""
