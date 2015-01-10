@@ -47,7 +47,7 @@ class MatMult(Differentiable):
 
 class MatSum(Differentiable):
     __slots__ = ['A', 'axis', 'keepdims']
-    def __init__(self, A, axis=None, keepdims=True):
+    def __init__(self, A, axis=None, keepdims=False):
         super(MatSum, self).__init__((A,))
         if axis is not None and type(axis) != int:
             raise Exception("Can only sum over one axis at a time.")
@@ -69,7 +69,7 @@ class MatSum(Differentiable):
 
 class MatMean(Differentiable):
     __slots__ = ['A', 'axis', 'keepdims']
-    def __init__(self, A, axis=None, keepdims=True):
+    def __init__(self, A, axis=None, keepdims=False):
         super(MatMean, self).__init__((A,))
         if axis is not None and type(axis) != int:
             raise Exception("Can only take the mean over one axis at a time.")
@@ -246,7 +246,7 @@ class MatElemMult(Differentiable):
 
 class MatDet(Differentiable):
     __slots__ = ['A']
-    def __init__(self, A, axis=None, keepdims=True):
+    def __init__(self, A, axis=None):
         super(MatDet, self).__init__((A,))
         self.A = A
 

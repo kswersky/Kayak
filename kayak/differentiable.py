@@ -145,8 +145,8 @@ class Differentiable(object):
             elif not self._children:
                 grad = 0
             else:
-                grad = sum(child._d_out_d_parent(out, parent_index)
-                           for child, parent_index in self._children_with_parent_indices)
+                grad = reduce(np.add, (child._d_out_d_parent(out, parent_index)
+                              for child, parent_index in self._children_with_parent_indices))
 
             self._loss = out
             self._grad = grad
@@ -155,65 +155,11 @@ class Differentiable(object):
 
     def _d_out_d_parent(self, out, parent):
         d_out_d_self = self._d_out_d_self(out)
-        if d_out_d_self is 0:
+        if not np.ndim(d_out_d_self) and not d_out_d_self:
             # This avoid calling local_grad for paths that don't end in 'out'
             return 0
         else:
             return self._local_grad(parent, d_out_d_self)
-
-    def _bfs(self):
-        q = SimpleQueue()
-        q.put(self)
-        bfs_list = [self]
-
-        visited = set()
-        while not q.empty():
-            node = q.get(block=False)
-            for parent in node._parents:
-                if parent._parents:
-                    if not parent in visited:
-                        visited.add(parent)
-                        q.put(parent)
-                        bfs_list.append(parent)
-
-        return bfs_list
-
-    def _topological_sort(self):
-        L = []
-        visited = set()
-
-        self._visit(self, L, visited)
-
-        return L
-
-    def _visit(self, node, L, visited):
-        if node not in visited:
-            for child in node._children.values():
-                self._visit(child, L, visited)
-            visited.add(node)
-            L.insert(0, node)
-
-    def newgrad(self, other):
-        simple_paths = other._topological_sort()
-        for node in reversed(simple_paths):
-            if node is self:
-                node.stuff = np.ones(self.shape)
-            elif not node._children:
-                node.stuff = 0
-            else:
-                try:
-                    node.stuff = sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
-                             for child, parent_index in node._children_with_parent_indices)
-                except Exception as e:
-                    raise e
-
-        g = sum(child._local_grad(parent_index, child.stuff) if child.stuff is not 0 else 0
-                    for child, parent_index in other._children_with_parent_indices)
-
-        if g is 0:
-            return np.zeros(other.shape)
-        
-        return g
 
     def _add_child(self, child, parent_index):
         """Parent_index is an int that tells out child which parent we are."""
@@ -225,7 +171,6 @@ class Differentiable(object):
 
     def _compute_value(self):
         raise Exception("Class 'Differentiable' is abstract.")
-
 
     def __getitem__(self, index):
         from . import Slice
